@@ -1,0 +1,174 @@
+# Required secrets:
+# OV_AUTOMATION_PAT_READ_PACKAGES - Access token to read GitHub Packages in the module-test-actions, scmdb and IKAMTeam repositories
+# OV_MODULES_LIBRARY_TOKEN - ModulesLibraryToken parameter value
+# OV_TRACKOR_AUTOMATION_ACCESS_KEY - Access Key for OneTeam used to manage Test Processes (optional, results will be available as WF artifacts)
+# OV_TRACKOR_AUTOMATION_SECRET_KEY - Secret Key for OneTeam (optional, results will be available as WF artifacts)
+
+# Optional secrets:
+# OV_GOOGLE_MAPS_API_KEY - Google Maps API key
+
+# Required variables:
+# OV_EKS_SERVICE_NAMESPACE - Name of service namespace in K8S
+# OV_MODULES_LIBRARY_REPOSITORY_ACCOUNT - ModulesLibraryRepositoryAccount parameter value
+# OV_UI_TEST_DB_PASSWORD - Oracle schemas password in DB container
+# OV_UI_TEST_NODEGROUP_CONFIG - {"services": "", "db": "", "selenium-hub": "", "selenium-node": ""}
+# OV_UI_TEST_WEB_PASSWORD - VizionPlatform users password
+
+name: Module tests
+on:
+  workflow_dispatch:
+    inputs:
+      platform_version:
+        description: ov-platform artifacts version
+        type: string
+        required: true
+        default: LATEST-SNAPSHOT
+      platform_maven_repository:
+        description: Maven repository to get ov-platform artifacts
+        type: string
+        required: true
+        default: https://maven.pkg.github.com/IKAMTeam/ov
+      platform_maven_repository_token_secret:
+        description: Maven repository secret
+        type: string
+        required: true
+        default: OV_AUTOMATION_PAT_READ_PACKAGES
+      db_owner:
+        description: DB owner user
+        type: string
+        required: true
+        default: test
+      ui_test_db_package_version:
+        description: DB package (docker image) version
+        type: string
+        required: true
+        default: latest
+
+env:
+  UI_TEST_DB_HOST: module-test-db-${{ github.run_id }}-${{ github.run_attempt }}.${{ vars.OV_EKS_SERVICE_NAMESPACE }}.svc.cluster.local
+  UI_TEST_DB_SID: ORCLCDB
+  UI_TEST_WEB_HOSTNAME: web-${{ github.run_id }}-${{ github.run_attempt }}.${{ vars.OV_EKS_SERVICE_NAMESPACE }}.svc.cluster.local
+  UI_TEST_WEB_URL: http://web-${{ github.run_id }}-${{ github.run_attempt }}.${{ vars.OV_EKS_SERVICE_NAMESPACE }}.svc.cluster.local
+jobs:
+  module_tests:
+    name: Run Module tests
+    runs-on: arc-set-t4g-small-selenium-tests
+    steps:
+      - name: Prepare environment
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          SUFFIX: ${{ github.run_number }}${{ github.run_attempt > 1 && format(' , attempt {0}', github.run_attempt) || '' }}
+        run: |
+          MODULE_NAME="${GITHUB_REPOSITORY#*/}"
+
+          echo "MODULE_NAME=$MODULE_NAME" >> "$GITHUB_ENV"
+          echo "UI_TEST_PROCESS_NAME=[module] $MODULE_NAME (#$SUFFIX)" >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout module-test-actions
+        uses: actions/checkout@v4
+        with:
+          repository: ov-integrations/module-test-actions
+          ref: v1
+          path: module-test-actions
+          token: ${{ secrets.OV_AUTOMATION_PAT_READ_PACKAGES }}
+
+      - name: Setup runner timezone
+        uses: ./module-test-actions/.github/actions/setup-timezone
+
+      - name: Fetch repository token from secret
+        env:
+          PLATFORM_MAVEN_REPOSITORY_TOKEN_SECRET: ${{ github.event.inputs.platform_maven_repository_token_secret }}
+        run: |
+          PLATFORM_MAVEN_REPOSITORY_TOKEN=$(jq -r ".$PLATFORM_MAVEN_REPOSITORY_TOKEN_SECRET" << 'EOF'
+            ${{ toJson(secrets) }}
+          EOF
+          )
+          echo "PLATFORM_MAVEN_REPOSITORY_TOKEN=$PLATFORM_MAVEN_REPOSITORY_TOKEN" >> $GITHUB_ENV
+
+      - name: Start services
+        uses: ./module-test-actions/.github/actions/start-deployments
+        with:
+          platform_maven_repository: ${{ github.event.inputs.platform_maven_repository }}
+          platform_maven_repository_token: ${{ env.PLATFORM_MAVEN_REPOSITORY_TOKEN }}
+          platform_version: ${{ github.event.inputs.platform_version }}
+
+          ui_test_db_package_version: ${{ github.event.inputs.ui_test_db_package_version }}
+          ui_test_db_host: ${{ env.UI_TEST_DB_HOST }}
+          ui_test_db_owner: ${{ github.event.inputs.db_owner }}
+          ui_test_db_password: ${{ vars.OV_UI_TEST_DB_PASSWORD }}
+          ui_test_db_sid: ${{ env.UI_TEST_DB_SID }}
+          ui_test_web_url: ${{ env.UI_TEST_WEB_URL }}
+          ui_test_web_hostname: ${{ env.UI_TEST_WEB_HOSTNAME }}
+          ui_test_web_password: ${{ vars.OV_UI_TEST_WEB_PASSWORD }}
+          ui_test_namespace: ${{ vars.OV_EKS_SERVICE_NAMESPACE }}
+
+          ui_test_db_nodegroup: ${{ fromJSON(vars.OV_UI_TEST_NODEGROUP_CONFIG).db }}
+          ui_test_services_nodegroup: ${{ fromJSON(vars.OV_UI_TEST_NODEGROUP_CONFIG).services }}
+          ui_test_se_hub_nodegroup: ${{ fromJSON(vars.OV_UI_TEST_NODEGROUP_CONFIG).selenium-hub }}
+          ui_test_se_node_nodegroup: ${{ fromJSON(vars.OV_UI_TEST_NODEGROUP_CONFIG).selenium-node }}
+
+          ov_automation_pat_read_packages: ${{ secrets.OV_AUTOMATION_PAT_READ_PACKAGES }}
+          ov_modules_library_repository_account: ${{ vars.OV_MODULES_LIBRARY_REPOSITORY_ACCOUNT }}
+          ov_modules_library_token: ${{ secrets.OV_MODULES_LIBRARY_TOKEN }}
+          ov_google_maps_api_key: ${{ secrets.OV_GOOGLE_MAPS_API_KEY }}
+
+      - name: Run Selenium tests
+        uses: ./module-test-actions/.github/actions/build-and-run-tests
+        with:
+          platform_maven_repository: ${{ github.event.inputs.platform_maven_repository }}
+          platform_maven_repository_token: ${{ env.PLATFORM_MAVEN_REPOSITORY_TOKEN }}
+          platform_version: ${{ github.event.inputs.platform_version }}
+
+          module_name: ${{ env.MODULE_NAME }}
+          ui_test_web_url: ${{ env.UI_TEST_WEB_URL }}
+          ui_test_web_password: ${{ vars.OV_UI_TEST_WEB_PASSWORD }}
+          ui_test_db_host: ${{ env.UI_TEST_DB_HOST }}
+          ui_test_db_owner: ${{ github.event.inputs.db_owner }}
+          ui_test_db_password: ${{ vars.OV_UI_TEST_DB_PASSWORD }}
+          ui_test_db_sid: ${{ env.UI_TEST_DB_SID }}
+          ui_test_namespace: ${{ vars.OV_EKS_SERVICE_NAMESPACE }}
+          process_name: ${{ env.UI_TEST_PROCESS_NAME }}
+          ov_trackor_automation_access_key: ${{ secrets.OV_TRACKOR_AUTOMATION_ACCESS_KEY }}
+          ov_trackor_automation_secret_key: ${{ secrets.OV_TRACKOR_AUTOMATION_SECRET_KEY }}
+
+      - name: Stop deployments
+        uses: ./module-test-actions/.github/actions/stop-deployments
+        with:
+          ui_test_namespace: ${{ vars.OV_EKS_SERVICE_NAMESPACE }}
+
+  stop_services:
+    name: Stop services
+    runs-on: arc-set-system-micro
+    needs:
+      - module_tests
+    if: always()
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout module-test-actions
+        uses: actions/checkout@v4
+        with:
+          repository: ov-integrations/module-test-actions
+          ref: ${{ vars.OV_MODULE_TEST_ACTIONS_GIT_REF }}
+          path: module-test-actions
+          token: ${{ secrets.OV_AUTOMATION_PAT_READ_PACKAGES }}
+
+      - name: Stop deployments
+        uses: ./module-test-actions/.github/actions/stop-deployments
+        with:
+          ui_test_db_package_version: ${{ github.event.inputs.ui_test_db_package_version }}
+          ui_test_db_host: ${{ env.UI_TEST_DB_HOST }}
+          ui_test_db_owner: ${{ github.event.inputs.db_owner }}
+          ui_test_db_password: ${{ vars.OV_UI_TEST_DB_PASSWORD }}
+          ui_test_db_sid: ${{ env.UI_TEST_DB_SID }}
+          ui_test_web_url: ${{ env.UI_TEST_WEB_URL }}
+          ui_test_namespace: ${{ vars.OV_EKS_SERVICE_NAMESPACE }}
+
+          ui_test_db_nodegroup: ${{ fromJSON(vars.OV_UI_TEST_NODEGROUP_CONFIG).db }}
+          ui_test_services_nodegroup: ${{ fromJSON(vars.OV_UI_TEST_NODEGROUP_CONFIG).services }}
+          ui_test_se_hub_nodegroup: ${{ fromJSON(vars.OV_UI_TEST_NODEGROUP_CONFIG).selenium-hub }}
+          ui_test_se_node_nodegroup: ${{ fromJSON(vars.OV_UI_TEST_NODEGROUP_CONFIG).selenium-node }}
