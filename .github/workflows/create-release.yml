@@ -1,0 +1,26 @@
+name: Create release
+
+# Required secrets:
+# OV_TRACKOR_AUTOMATION_SECRET_KEY - Secret Key for trackor.onevizion.com
+
+# Required variables:
+# OV_TRACKOR_AUTOMATION_ACCESS_KEY - Access Key for trackor.onevizion.com
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: 0 0 * * SAT
+
+permissions:
+  contents: write
+
+jobs:
+  create_release:
+    name: Create release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create release
+        uses: ov-integrations/ghactions/.github/actions/create-release@v1
+        with:
+          ov_trackor_automation_access_key: ${{ vars.OV_TRACKOR_AUTOMATION_ACCESS_KEY }}
+          ov_trackor_automation_secret_key: ${{ secrets.OV_TRACKOR_AUTOMATION_SECRET_KEY }}
