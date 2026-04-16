@@ -9,7 +9,7 @@ import logging
 # ====== For use in the app server environment
 # subprocess.check_call([sys.executable, '-m', 'pip', 'install', '-r', 'python_dependencies.ini'])
 
-from azure.identity import DefaultAzureCredential
+from azure.identity import ClientSecretCredential
 from azure.ai.projects import AIProjectClient
 from azure.ai.projects.models import (
     PromptAgentDefinition,
@@ -118,9 +118,15 @@ def upload_file_only(csv_path):
     if not project_endpoint:
         raise Exception("PROJECT_ENDPOINT not configured")
 
+    credential = ClientSecretCredential(
+        tenant_id=get_api_key("TENANT_ID"),
+        client_id=get_api_key("CLIENT_ID"),
+        client_secret=get_api_key("CLIENT_SECRET")
+    )
+
     project_client = AIProjectClient(
         endpoint=project_endpoint,
-        credential=DefaultAzureCredential()
+        credential=credential
     )
 
     openai_client = project_client.get_openai_client()
@@ -188,9 +194,15 @@ def attach_file_to_existing_agent_code_interpreter(file_id: str):
     if not project_endpoint or not model_name:
         raise Exception("Missing PROJECT_ENDPOINT or MODEL_DEPLOYMENT_NAME")
 
+    credential = ClientSecretCredential(
+        tenant_id=get_api_key("TENANT_ID"),
+        client_id=get_api_key("CLIENT_ID"),
+        client_secret=get_api_key("CLIENT_SECRET")
+    )
+
     project_client = AIProjectClient(
         endpoint=project_endpoint,
-        credential=DefaultAzureCredential()
+        credential=credential
     )
 
     code_interpreter = CodeInterpreterTool(
