@@ -1,1 +1,6 @@
-
+.shelf
+.idea
+*.iml
+*.ipr
+*.iws
+secrets.json
