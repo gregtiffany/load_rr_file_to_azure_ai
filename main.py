@@ -251,7 +251,7 @@ def update_trackor_with_agent_info(agent_version: int):
     if not all([base_url, bearer_token, trackor_type_id, trackor_id]):
         raise Exception("OneVizion configuration incomplete")
 
-    url = f"{base_url}/api/v3/trackor_types/{trackor_type_id}/trackors/{trackor_id}"
+    url = f"{base_url}/api/v3/trackors/{trackor_id}"
 
     payload = {
         "fields": [
