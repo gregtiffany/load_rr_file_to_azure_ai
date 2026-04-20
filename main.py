@@ -210,7 +210,7 @@ def attach_file_to_existing_agent_code_interpreter(file_id: str):
     )
 
     # Create a new version under the SAME agent name
-    project_client.agents.create_version(
+    new_agent = project_client.agents.create_version(
         agent_name=agent_name,
         definition=PromptAgentDefinition(
             model=model_name,
@@ -220,10 +220,64 @@ def attach_file_to_existing_agent_code_interpreter(file_id: str):
         description=f"Auto version created to attach file {file_id} for validation in Playground."
     )
 
+    agent_version = new_agent.version
+
+    update_trackor_with_agent_info(
+        agent_version=agent_version
+    )
+
     logger.info("Created new agent version for %s with Code Interpreter file_id=%s",
                 agent_name, file_id)
 
+# ------------------------------------------------------------------
+# NEW: Save Agent ID and Version Number to RR Fields
+# ------------------------------------------------------------------
+def update_trackor_with_agent_info(agent_version: int):
+    """
+    Writes the Agent ID and Agent Version created in Azure Foundry
+    back to OneVizion fields:
+      - RR_AGENT_ID (string)
+      - RR_AGENT_VERSION (number)
+    """
 
+    base_url = get_api_key("OV_BASE_URL")
+    bearer_token = get_api_key("ONEVIZION_BEARER_TOKEN")
+
+    ov_cfg = get_section("onevizion")
+
+    trackor_type_id = ov_cfg.get("trackor_type_id")
+    trackor_id = ov_cfg.get("trackor_id")
+
+    if not all([base_url, bearer_token, trackor_type_id, trackor_id]):
+        raise Exception("OneVizion configuration incomplete")
+
+    url = f"{base_url}/api/v3/trackortypes/{trackor_type_id}/trackors/{trackor_id}"
+
+    payload = {
+        "fields": [
+            {
+                "fieldName": "RR_AGENT_VERSION",
+                "value": agent_version
+            }
+        ]
+    }
+
+    headers = {
+        "Authorization": f"Bearer {bearer_token}",
+        "Content-Type": "application/json"
+    }
+
+    response = requests.put(url, headers=headers, json=payload)
+
+    if not response.ok:
+        logger.error("Failed updating Trackor with agent info: %s", response.text)
+        response.raise_for_status()
+
+    logger.info(
+        "Updated OV Trackor with Version=%s",
+        agent_id,
+        agent_version
+    )
 
 
 # ------------------------------------------------------------------
