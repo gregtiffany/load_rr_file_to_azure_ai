@@ -236,7 +236,6 @@ def update_trackor_with_agent_info(agent_version: int):
     """
     Writes the Agent ID and Agent Version created in Azure Foundry
     back to OneVizion fields:
-      - RR_AGENT_ID (string)
       - RR_AGENT_VERSION (number)
     """
 
@@ -270,7 +269,6 @@ def update_trackor_with_agent_info(agent_version: int):
 
     logger.info(
         "Updated OV Trackor with Version=%s",
-        agent_id,
         agent_version
     )
 
