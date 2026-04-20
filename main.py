@@ -254,12 +254,7 @@ def update_trackor_with_agent_info(agent_version: int):
     url = f"{base_url}/api/v3/trackors/{trackor_id}"
 
     payload = {
-        "fields": [
-            {
-                "fieldName": "RR_AGENT_VERSION",
-                "value": agent_version
-            }
-        ]
+        "RR_AGENT_VERSION": agent_version
     }
 
     headers = {
