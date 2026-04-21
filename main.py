@@ -323,7 +323,10 @@ def attach_file_to_existing_agent_code_interpreter(
         definition=PromptAgentDefinition(
             model=model_deployment_name,     # inherited
             instructions=instructions,       # inherited
-            tools=[code_interpreter]         # only change
+            tools=[
+                code_interpreter,
+                web_search
+            ] 
         ),
         description=(
             f"Auto version created to attach file {file_id} "
