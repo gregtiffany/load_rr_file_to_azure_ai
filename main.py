@@ -87,7 +87,7 @@ def list_report_repository_trackors() -> List[Dict[str, Any]]:
     path = (
         "/api/v3/trackor_types/Report_Repository/trackors"
         "?fields=RR_AZURE_AGENT_NAME%2CRR_AZURE_PROJECT_ENDPOINT"
-        "&RR_AZURE_AGENT_NAME=null"
+        "&RR_AZURE_AGENT_NAME=not%20null"
     )
 
     url = f"{base_url.rstrip('/')}{path}"
