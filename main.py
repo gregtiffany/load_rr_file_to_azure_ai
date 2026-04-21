@@ -210,56 +210,77 @@ def update_trackor_with_agent_info(trackor_id: int, agent_version: int) -> None:
 # ------------------------------------------------------------------
 # Azure Foundry: determine Model Deployment Name from latest agent version
 # ------------------------------------------------------------------
-def resolve_model_deployment_from_latest_agent_version(
+def resolve_model_and_instructions_from_latest_agent_version(
     project_client: AIProjectClient,
     agent_name: str
-) -> str:
+) -> tuple[str, str]:
     """
-    Reads the model deployment used by the LATEST agent version and returns it.
-    This value is the PromptAgentDefinition.model (the model deployment).  [1](https://learn.microsoft.com/en-us/python/api/azure-ai-projects/azure.ai.projects.models.promptagentdefinition?view=azure-python)
+    Resolves BOTH:
+      - model deployment name
+      - instructions
+    from the LATEST version of an existing agent.
 
-    Because SDK surfaces can vary by package version, we try a couple of common patterns:
-      - project_client.agents.list_versions(agent_name=...)
-      - project_client.agents.get_version(agent_name=..., agent_version=...)
-    If neither exists, we fail with a clear error.
+    This ensures new versions inherit behavior exactly, changing
+    only tools or attachments.
     """
+
     agents_ops = project_client.agents
 
     if not hasattr(agents_ops, "list_versions"):
-        raise Exception("This azure-ai-projects version does not expose agents.list_versions; cannot auto-resolve model.")
+        raise Exception(
+            "This azure-ai-projects SDK version does not expose agents.list_versions; "
+            "cannot auto-resolve agent configuration."
+        )
 
     versions = list(agents_ops.list_versions(agent_name=agent_name))
     if not versions:
-        raise Exception(f"No versions found for agent '{agent_name}'. Cannot auto-resolve model deployment.")
+        raise Exception(f"No versions found for agent '{agent_name}'")
 
     # Determine latest version number robustly
-    def vnum(v: Any) -> int:
+    def vnum(v):
         return int(getattr(v, "version", v))
 
     latest = max(versions, key=vnum)
     latest_version_number = vnum(latest)
 
+    # Retrieve full version details if supported
     details = latest
     if hasattr(agents_ops, "get_version"):
-        details = agents_ops.get_version(agent_name=agent_name, agent_version=latest_version_number)
+        details = agents_ops.get_version(
+            agent_name=agent_name,
+            agent_version=latest_version_number
+        )
 
-    # Try common fields: details.model OR details.definition.model OR dict-like
-    model = getattr(details, "model", None)
-    if model:
-        return model
+    # ---- Extract definition safely ----
+    definition = None
 
-    definition = getattr(details, "definition", None)
-    if definition is None and isinstance(details, dict):
+    if hasattr(details, "definition"):
+        definition = details.definition
+    elif isinstance(details, dict):
         definition = details.get("definition")
 
-    if definition is not None:
-        if isinstance(definition, dict) and definition.get("model"):
-            return definition["model"]
-        model2 = getattr(definition, "model", None)
-        if model2:
-            return model2
+    if definition is None:
+        raise Exception(
+            f"Unable to read definition for latest version of agent '{agent_name}'"
+        )
 
-    raise Exception(f"Unable to extract model deployment from latest version of agent '{agent_name}'.")
+    # ---- Extract model deployment ----
+    model = getattr(definition, "model", None)
+    if not model and isinstance(definition, dict):
+        model = definition.get("model")
+
+    # ---- Extract instructions ----
+    instructions = getattr(definition, "instructions", None)
+    if not instructions and isinstance(definition, dict):
+        instructions = definition.get("instructions")
+
+    if not model or not instructions:
+        raise Exception(
+            f"Latest agent version for '{agent_name}' is missing model or instructions "
+            f"(model={model}, instructions_present={bool(instructions)})"
+        )
+
+    return model, instructions
 
 
 # ------------------------------------------------------------------
@@ -272,15 +293,11 @@ def attach_file_to_existing_agent_code_interpreter(
     file_id: str
 ) -> None:
     """
-    Creates a NEW VERSION of an existing agent and configures Code Interpreter
-    with the uploaded file_id. Pattern matches Foundry samples using create_version
-    with PromptAgentDefinition(model=deployment_name, ...). [2](https://github.com/Azure/azure-sdk-for-python/blob/main/sdk/ai/azure-ai-projects/samples/agents/tools/sample_agent_code_interpreter.py)[1](https://learn.microsoft.com/en-us/python/api/azure-ai-projects/azure.ai.projects.models.promptagentdefinition?view=azure-python)
+    Creates a NEW VERSION of an existing agent, reusing:
+      - model deployment
+      - instructions
+    from the latest agent version, while attaching Code Interpreter + file.
     """
-    agent_cfg = get_section("agent")
-    instructions = agent_cfg.get(
-        "instructions_for_new_version",
-        "Use Code Interpreter to analyze the attached CSV."
-    )
 
     if not project_endpoint:
         raise Exception("Missing PROJECT_ENDPOINT for this trackor")
@@ -289,29 +306,41 @@ def attach_file_to_existing_agent_code_interpreter(
 
     project_client = build_project_client(project_endpoint)
 
-    # (3) Auto resolve model deployment name from latest existing agent version
-    model_deployment_name = resolve_model_deployment_from_latest_agent_version(project_client, agent_name)
+    # ✅ Resolve BOTH model deployment and instructions from latest version
+    model_deployment_name, instructions = (
+        resolve_model_and_instructions_from_latest_agent_version(
+            project_client=project_client,
+            agent_name=agent_name
+        )
+    )
 
     code_interpreter = CodeInterpreterTool(
         container=AutoCodeInterpreterToolParam(file_ids=[file_id])
     )
 
-    # Create a new version under the SAME agent name
     new_agent = project_client.agents.create_version(
         agent_name=agent_name,
         definition=PromptAgentDefinition(
-            model=model_deployment_name,          # model == model deployment [1](https://learn.microsoft.com/en-us/python/api/azure-ai-projects/azure.ai.projects.models.promptagentdefinition?view=azure-python)
-            instructions=instructions,
-            tools=[code_interpreter]
+            model=model_deployment_name,     # inherited
+            instructions=instructions,       # inherited
+            tools=[code_interpreter]         # only change
         ),
-        description=f"Auto version created to attach file {file_id} for validation in Playground."
+        description=(
+            f"Auto version created to attach file {file_id} "
+            f"for validation in Playground."
+        )
     )
 
     agent_version = new_agent.version
-    update_trackor_with_agent_info(trackor_id=trackor_id, agent_version=agent_version)
+
+    update_trackor_with_agent_info(
+        trackor_id=trackor_id,
+        agent_version=agent_version
+    )
 
     logger.info(
-        "Created new agent version for %s (trackor=%s) model=%s with Code Interpreter file_id=%s",
+        "Created new agent version for %s (trackor=%s) "
+        "model=%s with Code Interpreter file_id=%s",
         agent_name, trackor_id, model_deployment_name, file_id
     )
 
