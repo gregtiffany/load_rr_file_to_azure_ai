@@ -11,7 +11,8 @@ from azure.ai.projects import AIProjectClient
 from azure.ai.projects.models import (
     PromptAgentDefinition,
     CodeInterpreterTool,
-    AutoCodeInterpreterToolParam
+    AutoCodeInterpreterToolParam,
+    WebSearchTool
 )
 
 SETTINGS_FILE = "settings.json"
@@ -317,6 +318,7 @@ def attach_file_to_existing_agent_code_interpreter(
     code_interpreter = CodeInterpreterTool(
         container=AutoCodeInterpreterToolParam(file_ids=[file_id])
     )
+    web_search = WebSearchTool()
 
     new_agent = project_client.agents.create_version(
         agent_name=agent_name,
